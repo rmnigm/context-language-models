@@ -231,7 +231,8 @@ class ClmStream(CBStreamMixin, ClmAgent):
             if self._cb_overflow or self._budget.finalized:
                 self.cb_finish("budget_wall")
             elif completed:
-                # The loop ended without a terminal reason from the stream: a step cap.
+                # The loop ended without a terminal reason from the stream: a step cap
+                # (usage.json's hit_empty_turn_cap / hit_lm_call_cap says which).
                 self.cb_finish("max_steps")
             else:
                 self.cb_finish(None)

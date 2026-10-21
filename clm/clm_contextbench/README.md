@@ -69,6 +69,13 @@ These are pinned at their `ClmAgent` defaults: `context_budget_reserve_tokens=20
 `finish_policy=submit`, `enable_thinking=true`, `send_chat_template_kwargs=true`. The system prompt
 and the task template (`terminal_agent_tasks`) are `ClmAgent`'s own.
 
+`reasoning_history` (not a paper setting; default `all`) tells the budget gate which past
+`reasoning_content` the served chat template keeps in the prompt. `all` counts every turn's
+reasoning. `since_last_user` counts only the assistant turns after the newest user query, the
+rule of Qwen3's template. Serving Qwen3 through llama-server with `all`, a run that thinks a lot
+reaches the wall with the real prompt at a third of the budget: 2659 served tokens against
+8266 counted. `tok_ratio` cannot absorb the gap, because the ratio leaves its [0.5, 3.0] clamp.
+
 The paper's runs gave each trial 21600 s. That is the task's `[agent] timeout_sec`; pass
 `--agent-timeout-sec 21600` to `contextbench package` to match it.
 
@@ -131,7 +138,9 @@ position as the CLM skill and sha-checked against `BASE_SKILL_SHA16`:
   log L6400/L12800 and needle K2-C192/K2-C224; the short `<family>.short.md` at the other kv and
   log rungs and every sudoku rung; no skill at the other needle rungs. Other levels or a budget
   other than 32768 are refused: pass a variant.
-- `detailed`, `short`, `none`: that variant everywhere (sudoku has no detailed skill).
+- `detailed`, `short`, `none`: that variant everywhere (sudoku has no detailed skill). `detailed`
+  is refused at budgets other than 32768. Its texts state the paper's budget and that level's
+  batch sizes ("the usable 30,720 tokens hold about six of them").
 
 `clm_stream.json` records `arm`, `level` and `base_skill` besides the usual fields.
 
@@ -139,8 +148,9 @@ What this does not reproduce: the paper's base arm was a separate mini-swe-agent
 append-only harness with its own prompts (see ContextBench's `docs/HARBOR_SMOKE.md`), not
 `ClmAgent` with the mirror removed. `BaseStream` keeps `ClmAgent`'s system prompt (minus the
 mirror section), task template, budget controller and readout, so the two arms differ only in
-the mechanism and the skill. The skill texts state the paper's 32,768-token budget; at other
-budgets they are run unchanged.
+the mechanism and the skill. Of the texts these two arms use, only the detailed base skills
+state a budget (32,768). The CLM skills and the short base skills state none, so they run
+unchanged at any budget.
 
 ## Outputs
 

@@ -221,7 +221,13 @@ class ClmAgent(BaseAgent):
         # Count the finalize notice down on whichever budget runs out first: task
         # steps or LM calls left under lm_call_cap. False counts task steps only.
         finalize_on_lm_call_cap: bool | str = True,
+        # Stop the run after this many no-tool-call turns in a row (e.g. a model whose
+        # thinking always runs into max_tokens). 0 (default) disables the stop.
+        max_consecutive_empty_turns: int = 0,
         enable_thinking: bool = True,
+        # Past reasoning the served chat template keeps in the prompt, for the budget gate:
+        # "all" (default) or "since_last_user" (Qwen3-style templates; see BudgetController).
+        reasoning_history: str = "all",
         send_chat_template_kwargs: bool = True,
         emit_ctx_trajectory: bool = True,
         flops_model_key: str | None = None,
@@ -308,6 +314,7 @@ class ClmAgent(BaseAgent):
             retry_edit_margin_tokens=self.retry_edit_margin_tokens,
             protect_prefix=_PROTECT,
             compaction_hint=hint,
+            reasoning_history=reasoning_history,
         )
         self.finalize_nudge_turns = int(finalize_nudge_turns)
         self.finalize_message = finalize_message
@@ -317,6 +324,8 @@ class ClmAgent(BaseAgent):
         else:
             self.lm_call_cap = max(0, int(lm_call_cap))
         self.finalize_on_lm_call_cap = self._as_bool(finalize_on_lm_call_cap)
+        self.max_consecutive_empty_turns = max(0, int(max_consecutive_empty_turns))
+        self.hit_empty_turn_cap = False
         self.n_lm_calls = 0
         self.hit_lm_call_cap = False
         self.enable_thinking = self._as_bool(enable_thinking)
@@ -506,6 +515,7 @@ class ClmAgent(BaseAgent):
         # below). `total_iters` bounds ALL LLM calls so free turns can't loop unbounded.
         step = 0
         total_iters = 0
+        empty_in_a_row = 0
         # Each allowed retry needs at least one extra LLM call (the forced compaction), so
         # grant headroom for them — still bounded, so a thrashing run can't loop forever.
         # lm_call_cap, when set, is checked separately.
@@ -598,7 +608,14 @@ class ClmAgent(BaseAgent):
                     )
                     timing_log.append({"step": step + 1, "llm_s": round(llm_time, 1), "empty_turn": True})
                     step += 1  # an empty (no-tool-call) turn counts (as before)
+                    empty_in_a_row += 1
+                    cap = self.max_consecutive_empty_turns
+                    if cap and empty_in_a_row >= cap:
+                        self.hit_empty_turn_cap = True
+                        logger.warning("%d empty turns in a row; stopping run", empty_in_a_row)
+                        break
                     continue
+                empty_in_a_row = 0
 
                 if action["type"] == "context_status":
                     messages.append(msg)
@@ -681,6 +698,7 @@ class ClmAgent(BaseAgent):
                         "n_lm_calls": self.n_lm_calls,
                         "lm_call_cap": self.lm_call_cap,
                         "hit_lm_call_cap": self.hit_lm_call_cap,
+                        "hit_empty_turn_cap": self.hit_empty_turn_cap,
                         "context_budget_tokens": self.context_budget_tokens,
                         "over_budget_policy": (
                             "rollback_retry" if self.max_num_retry_on_limit else "error_finalize"

@@ -45,6 +45,18 @@ from typing import Any
 from . import tokens as tk
 
 
+#: ``reasoning_history`` modes, see :meth:`BudgetController.prompt_view`.
+REASONING_HISTORY = ("all", "since_last_user")
+
+
+def _is_query(msg: dict[str, Any]) -> bool:
+    """A user turn that Qwen3's template counts as a query: one that does not contain both
+    tool-response tags (the template's substring test)."""
+    content = msg.get("content")
+    return msg.get("role") == "user" and not (
+        isinstance(content, str) and "<tool_response>" in content and "</tool_response>" in content)
+
+
 #: consecutive ignored rollbacks tolerated before the rollback starts digging deeper
 _ROLLBACK_ESCALATE_AFTER = 3
 
@@ -73,8 +85,15 @@ class BudgetController:
         max_num_retry_on_limit: int = 0,
         retry_edit_margin_tokens: int = 2048,
         protect_prefix: int = 2,
+        reasoning_history: str = "all",
     ) -> None:
         self.budget = int(budget_tokens or 0)
+        if reasoning_history not in REASONING_HISTORY:
+            raise ValueError(
+                f"reasoning_history must be one of {'|'.join(REASONING_HISTORY)}, "
+                f"got {reasoning_history!r}")
+        # Past reasoning the served template renders, see :meth:`prompt_view`.
+        self.reasoning_history = reasoning_history
         self.reserve = int(reserve_tokens)
         # tiktoken -> served-tokenizer ratio, learned from real responses.
         self.tok_ratio = 1.0
@@ -129,6 +148,18 @@ class BudgetController:
     def finalized(self) -> bool:
         return self._finalized
 
+    def prompt_view(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """``messages`` as the served template renders them. ``all`` keeps every turn's
+        reasoning; ``since_last_user`` drops it before the newest query (Qwen3's template)."""
+        if self.reasoning_history == "all":
+            return messages
+        last_user = max((i for i, m in enumerate(messages) if _is_query(m)), default=len(messages))
+        return [
+            {k: v for k, v in m.items() if k != "reasoning_content"}
+            if i < last_user and m.get("reasoning_content") else m
+            for i, m in enumerate(messages)
+        ]
+
     def count(self, messages: list[dict[str, Any]]) -> int:
         """Retained-context token count, CALIBRATED to the served tokenizer.
 
@@ -138,7 +169,7 @@ class BudgetController:
         absorb it. The count is therefore scaled by :attr:`tok_ratio`, learned from
         the server's reported prompt token counts (see :meth:`calibrate`).
         """
-        return int(tk.count_tokens(messages)[0] * self.tok_ratio)
+        return int(tk.count_tokens(self.prompt_view(messages))[0] * self.tok_ratio)
 
     def calibrate(self, response: Any, sent: list[dict[str, Any]]) -> None:
         """Fold the server's reported ``prompt_tokens`` into :attr:`tok_ratio`.
@@ -161,7 +192,7 @@ class BudgetController:
             return
         if pt <= 0:
             return
-        raw = tk.count_tokens(sent)[0]
+        raw = tk.count_tokens(self.prompt_view(sent))[0]
         if raw <= 0:
             return
         ratio = pt / raw
@@ -404,7 +435,7 @@ class BudgetController:
         (only ever the newest message; cache-friendly)."""
         if not self.enabled:
             return tool_content
-        base = tk.count_tokens(messages)[0]
+        base = tk.count_tokens(self.prompt_view(messages))[0]
         room = self.strict_target - base
         body = tk.count_tokens([{"role": "tool", "content": tool_content}])[0]
         if body <= room:

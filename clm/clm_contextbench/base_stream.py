@@ -53,7 +53,7 @@ def paper_base_skill(family: str, level: str | None, budget: int) -> str:
     if budget != _PAPER_BUDGET or choice is None:
         raise ValueError(
             f"{family} level {level} at budget {budget} is not a level of the paper's figure; "
-            "pass skill=detailed|short|none")
+            "pass skill=short|none, or skill=detailed at budget 32768")
     return choice
 
 
@@ -89,7 +89,7 @@ class BaseStream(ClmStream):
     """``ClmStream`` with no context mirror and no edit path, and the paper's base skill.
 
     ``skill``: ``paper`` (default: the variant the paper ran at this level; only for the
-    paper's levels at its 32768 budget), ``detailed``, ``short`` or ``none``.
+    paper's levels at its 32768 budget), ``detailed`` (only at 32768), ``short`` or ``none``.
     """
 
     def __init__(self, *args: Any, skill: str | None = "paper", skills_dir: str | None = None,
@@ -118,6 +118,10 @@ class BaseStream(ClmStream):
         variant = self.base_skill
         if variant == "paper":
             variant = paper_base_skill(family, self._cb_level, self.context_budget_tokens)
+        if variant == "detailed" and self.context_budget_tokens != _PAPER_BUDGET:
+            raise ValueError(
+                "the detailed base skills state the paper's 32,768 budget and its batch sizes; "
+                f"at budget {self.context_budget_tokens} pass skill=short|none")
         self._cb_record.update(level=self._cb_level, base_skill=variant)
         if variant == "none":
             return instruction
