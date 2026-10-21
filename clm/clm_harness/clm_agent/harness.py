@@ -90,7 +90,12 @@ _CONTEXT_OVERFLOW_RE = re.compile(
     r"exceeds? the model'?s? (?:maximum )?context|"
     # gateway phrasings, e.g. "prompt is too long: 3062409 tokens > 1000000 maximum"
     r"prompt is too long|input (?:is )?too long|context_length_exceeded|"
-    r"tokens?\s*>\s*\d[\d,]*\s*maximum|too many input tokens)",
+    r"tokens?\s*>\s*\d[\d,]*\s*maximum|too many input tokens|"
+    # llama.cpp llama-server (tools/server/server-context.cpp, type exceed_context_size_error)
+    r"exceeds the available context size|larger than the max context size|"
+    r"exceed_context_size_error|context size has been exceeded|"
+    # mistral.rs (mistralrs-core/src/engine/add_request.rs)
+    r"prompt sequence length is greater than)",
     re.IGNORECASE,
 )
 # Attempts per LM call on transient errors (env-overridable for flaky endpoints).
