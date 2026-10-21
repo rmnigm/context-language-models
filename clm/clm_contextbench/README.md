@@ -1,7 +1,8 @@
 # clm_contextbench
 
 CLM on [ContextBench](https://github.com/RulinShao/ContextBench) under Harbor. `ClmStream` runs
-the unmodified `ClmAgent` from [`clm_harness`](../clm_harness/) on ContextBench tasks.
+the unmodified `ClmAgent` from [`clm_harness`](../clm_harness/) on ContextBench tasks;
+`BaseStream` runs the same loop with no context mechanism (the paper's Base arm).
 
 ContextBench pushes each op as a user message into one continuous conversation. The agent
 signals that it is ready for the next op with a standalone `READY_FOR_NEXT_OP`. It cannot fetch
@@ -95,6 +96,51 @@ already (`contextbench package --method-file ...`), the skill is not inserted tw
 Other values: `skill=none` runs without a skill; `skill=<name>` reads
 `<skills_dir>/<name>/<family>.md`; an absolute path names a skill directory directly.
 `skills_dir` defaults to ContextBench's `clm_exp/skills`. Only `skill=clm` is sha-checked.
+
+## Preflight
+
+Both adapters refuse to start when:
+
+- the agent's `context_budget_tokens` / `context_budget_reserve_tokens` differ from the task's
+  `contextbench_budget_tokens` / `contextbench_reserve_tokens` (its `task.toml`, next to the
+  environment directory Harbor builds the container from): the wall and the grading assume the
+  task's budget;
+- tiktoken's `o200k_base` is unavailable (offline without `TIKTOKEN_CACHE_DIR`): the harness would
+  silently count chars/4, so every wall and readout would be off.
+
+## Base arm (`BaseStream`)
+
+`-a clm_contextbench:BaseStream` is the paper's Base arm as a variant of `ClmStream`: the same loop,
+`PAPER_KWARGS`, marker contract, budget wall, snapshots and outputs, with the context mechanism
+removed:
+
+| | `ClmStream` | `BaseStream` |
+|---|---|---|
+| mirror `/tmp/.live_ctx/LIVE_CTX_MAIN.txt` | written before, read back after every command | none |
+| edits | synced with `parse_back` (and flattening) | none; the context only grows, every turn costs a step |
+| system prompt, "## Managing your context" | goal + budget + mirror-file instructions | goal + budget sentence only |
+| readout after each command | `[context: ~N/M tokens]`, over the limit `— OVER; compact <file> now` | same line, `— OVER` only |
+| method skill | `clm/<family>.md` | the paper's base skill, see below |
+| nudges, rollback-retry | off in `PAPER_KWARGS` | off and refused if set (their text tells the model to compact the mirror) |
+
+`skill` picks the base skill from ContextBench's `clm_exp/skills/base/`, inserted at the same
+position as the CLM skill and sha-checked against `BASE_SKILL_SHA16`:
+
+- `paper` (default): the variant the paper's figure ran at the task's level, read from the task
+  directory name (`<family>-<level>-seed<N>`): the detailed `<family>.md` at kv R8000/R16000,
+  log L6400/L12800 and needle K2-C192/K2-C224; the short `<family>.short.md` at the other kv and
+  log rungs and every sudoku rung; no skill at the other needle rungs. Other levels or a budget
+  other than 32768 are refused: pass a variant.
+- `detailed`, `short`, `none`: that variant everywhere (sudoku has no detailed skill).
+
+`clm_stream.json` records `arm`, `level` and `base_skill` besides the usual fields.
+
+What this does not reproduce: the paper's base arm was a separate mini-swe-agent-style
+append-only harness with its own prompts (see ContextBench's `docs/HARBOR_SMOKE.md`), not
+`ClmAgent` with the mirror removed. `BaseStream` keeps `ClmAgent`'s system prompt (minus the
+mirror section), task template, budget controller and readout, so the two arms differ only in
+the mechanism and the skill. The skill texts state the paper's 32,768-token budget; at other
+budgets they are run unchanged.
 
 ## Outputs
 

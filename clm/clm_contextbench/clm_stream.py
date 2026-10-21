@@ -41,6 +41,8 @@ from clm_harness.utils.finish_policy import FinishPolicy
 from contextbench import stream as proto
 from contextbench.harbor.mixin import CBStreamMixin
 
+from .preflight import check_budget, check_tokenizer, task_metadata
+
 __all__ = ["ClmStream", "PAPER_KWARGS", "PAPER_SKILL_SHA16", "family_of", "load_skill",
            "place_skill"]
 
@@ -199,6 +201,9 @@ class ClmStream(CBStreamMixin, ClmAgent):
         return place_skill(instruction, text, family)
 
     async def run(self, instruction: str, environment: Any, context: Any) -> None:
+        check_tokenizer()
+        check_budget(task_metadata(environment), self.context_budget_tokens,
+                     self.context_budget_reserve_tokens)
         await self.cb_setup(environment, budget=self.context_budget_tokens,
                             reserve=self.context_budget_reserve_tokens)
         instruction = self._with_skill(instruction)
